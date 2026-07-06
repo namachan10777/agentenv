@@ -1,0 +1,28 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: cargo fmt
+        run: nix develop -c cargo fmt --check
+      - name: cargo clippy
+        run: nix develop -c cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        run: nix develop -c cargo test
+      - name: nix build
+        run: nix build
