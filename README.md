@@ -10,6 +10,10 @@ environments.
   (default `~/.local/share/agentenv/<name>`).
 - The last `switch`ed environment is saved to
   `$XDG_STATE_HOME/agentenv/current`.
+- Paths can be pinned to an environment via
+  `$XDG_CONFIG_HOME/agentenv/config.toml` (default
+  `~/.config/agentenv/config.toml`) when a `.agentenv` file can't be placed
+  in that directory — see [Pinning a path via config.toml](#pinning-a-path-via-configtoml).
 
 ## Usage
 
@@ -53,21 +57,27 @@ environment is applied automatically.
 
 ## How the environment is chosen
 
-`load` resolves the environment in this order:
+`load` resolves the environment by walking up from the current directory,
+checking each directory in turn, then falling back to `$AGENTENV_OVERRIDE`
+and the saved state:
 
-1. **`.agentenv` file** — walking up from the current directory, the first
-   `.agentenv` file wins; its first non-blank, non-`#` line names the env.
+1. **`.agentenv` file** and **`config.toml` path entry** — at each directory
+   from the current one up to `/`, a `.agentenv` file there wins immediately;
+   if there isn't one, a matching `config.toml` path entry (see below) wins
+   instead. Only when *both* exist in the very same directory does
+   `.agentenv` take precedence — otherwise whichever is found first while
+   walking up (i.e. the closer one) wins.
 2. **`$AGENTENV_OVERRIDE`** — for pinning an env without a `.agentenv` file
    (e.g. via direnv).
 3. **Saved state** — whatever you last `switch`ed to (`default` initially).
 
-`agentenv switch` refuses to run while a `.agentenv` file or
-`$AGENTENV_OVERRIDE` pin is active, so you cannot silently escape a pinned
-project. `switch --force` overrides the pin for the current shell only; the
-pin is recorded in `AGENTENV_STATE` and the force expires as soon as the
-underlying source changes (the `.agentenv` content changes, you cd under a
-different `.agentenv`, the override variable changes, …) — fail-safe against
-forgotten switches.
+`agentenv switch` refuses to run while a `.agentenv` file, `config.toml`
+entry or `$AGENTENV_OVERRIDE` pin is active, so you cannot silently escape a
+pinned project. `switch --force` overrides the pin for the current shell
+only; the pin is recorded in `AGENTENV_STATE` and the force expires as soon
+as the underlying source changes (the `.agentenv` content changes, you cd
+under a different `.agentenv`/`config.toml` entry, the override variable
+changes, …) — fail-safe against forgotten switches.
 
 The shell's current selection is exported as `AGENTENV_STATE`, e.g.:
 
@@ -76,15 +86,39 @@ The shell's current selection is exported as `AGENTENV_STATE`, e.g.:
 ```
 
 `type` is one of `load-default` (saved state / plain switch),
-`file-overrided` (`.agentenv`), `env-overrided` (`$AGENTENV_OVERRIDE`) or
-`cli-overrided` (`switch --force`).
+`file-overrided` (`.agentenv`), `config-overrided` (`config.toml`),
+`env-overrided` (`$AGENTENV_OVERRIDE`) or `cli-overrided` (`switch --force`).
+
+### Pinning a path via config.toml
+
+If you can't drop a `.agentenv` file into a directory (read-only checkout,
+shared repo, worktree you don't want to touch, …), pin it from
+`$XDG_CONFIG_HOME/agentenv/config.toml` (default
+`~/.config/agentenv/config.toml`) instead:
+
+```toml
+[path."/home/namachan/ghq/github.com/namachan10777/namachan10777.dev"]
+env = "default"
+```
+
+- The table key is an absolute path; it applies to that directory and
+  everything under it (matching works the same way `.agentenv` walks up
+  ancestor directories).
+- Keys are resolved through symlinks, so pinning the real path or a symlink
+  to it both work.
+- Priority-wise it sits right next to `.agentenv`: see
+  [How the environment is chosen](#how-the-environment-is-chosen) above —
+  in short, whichever of `.agentenv` / `config.toml` is found at the closer
+  directory wins, and `.agentenv` only wins outright when both are present
+  in the same directory.
 
 ## Prompt
 
 `agentenv prompt` prints a short segment with a marker per selection type:
-`work` (saved state), `work*` (`.agentenv`), `work%` (`$AGENTENV_OVERRIDE`),
-`work!` (`switch --force`); nothing for the plain `default`. See
-`agentenv starship` for a ready-made `[custom.agentenv]` starship module.
+`work` (saved state), `work*` (`.agentenv`), `work+` (`config.toml`),
+`work%` (`$AGENTENV_OVERRIDE`), `work!` (`switch --force`); nothing for the
+plain `default`. See `agentenv starship` for a ready-made `[custom.agentenv]`
+starship module.
 
 ## Development
 
