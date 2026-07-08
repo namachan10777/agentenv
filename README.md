@@ -104,6 +104,9 @@ env = "default"
 - The table key is an absolute path; it applies to that directory and
   everything under it (matching works the same way `.agentenv` walks up
   ancestor directories).
+- Keys may start with `~` and reference `$VAR` / `${VAR}` — both are expanded
+  against your environment before matching (an unset variable expands to
+  empty), so `[path."$HOME/repo"]` or `[path."~/repo"]` work as expected.
 - Keys are resolved through symlinks, so pinning the real path or a symlink
   to it both work.
 - Priority-wise it sits right next to `.agentenv`: see

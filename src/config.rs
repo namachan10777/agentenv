@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,9 +10,12 @@ use std::path::{Path, PathBuf};
 /// can't be placed in that directory (read-only checkout, shared repo, ...).
 ///
 /// ```toml
-/// [path."/home/user/repo"]
+/// [path."$HOME/repo"]
 /// env = "work"
 /// ```
+///
+/// Path keys may use a leading `~` and `$VAR` / `${VAR}` references, expanded
+/// against the current environment (an unset variable expands to empty).
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default, rename = "path")]
@@ -25,9 +29,10 @@ pub struct PathEntry {
 
 /// Load and parse `config_file`. A missing file is fine (`Ok(None)`); a
 /// present-but-unparseable file is a hard error, same as an invalid
-/// `.agentenv` name. Keys are canonicalized so lookups match even when the
-/// directory is reached through a symlink; a key that doesn't exist on disk
-/// is left as-is and simply won't match anything.
+/// `.agentenv` name. Keys are expanded (`~`, `$VAR`, `${VAR}`) and then
+/// canonicalized so lookups match even when the directory is reached through
+/// a symlink; a key that doesn't exist on disk is left as-is (expanded but
+/// not canonicalized) and simply won't match anything.
 pub fn load(config_file: &Path) -> Result<Option<Config>> {
     let content = match fs::read_to_string(config_file) {
         Ok(content) => content,
@@ -42,9 +47,51 @@ pub fn load(config_file: &Path) -> Result<Option<Config>> {
     config.path = config
         .path
         .into_iter()
-        .map(|(path, entry)| (fs::canonicalize(&path).unwrap_or(path), entry))
+        .map(|(path, entry)| {
+            let expanded = expand_path(&path.to_string_lossy());
+            (fs::canonicalize(&expanded).unwrap_or(expanded), entry)
+        })
         .collect();
     Ok(Some(config))
+}
+
+/// Expand a leading `~` (to `$HOME`) and any `$VAR` / `${VAR}` references.
+fn expand_path(raw: &str) -> PathBuf {
+    let raw = match raw.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            match env::var_os("HOME") {
+                Some(home) => format!("{}{rest}", home.to_string_lossy()),
+                None => raw.to_owned(),
+            }
+        }
+        _ => raw.to_owned(),
+    };
+    PathBuf::from(expand_env_vars(&raw))
+}
+
+fn expand_env_vars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next();
+            let name: String = chars.by_ref().take_while(|&c| c != '}').collect();
+            out.push_str(&env::var(&name).unwrap_or_default());
+        } else if matches!(chars.peek(), Some(c) if c.is_alphabetic() || *c == '_') {
+            let mut name = String::new();
+            while matches!(chars.peek(), Some(c) if c.is_alphanumeric() || *c == '_') {
+                name.push(chars.next().unwrap());
+            }
+            out.push_str(&env::var(&name).unwrap_or_default());
+        } else {
+            out.push('$');
+        }
+    }
+    out
 }
 
 /// Look up the entry for `dir`, which must already be canonicalized.
@@ -97,5 +144,46 @@ mod tests {
         let config = load(&file).unwrap().unwrap();
         assert!(lookup(Path::new("/does/not/exist"), &config).is_some());
         assert!(lookup(tmp.path(), &config).is_none());
+    }
+
+    #[test]
+    fn expands_tilde_to_home() {
+        let home = env::var("HOME").unwrap();
+        assert_eq!(expand_path("~/repo"), PathBuf::from(format!("{home}/repo")));
+        assert_eq!(expand_path("~"), PathBuf::from(home));
+        assert_eq!(expand_path("/foo~bar"), PathBuf::from("/foo~bar"));
+    }
+
+    #[test]
+    fn expands_dollar_var_and_braced_var() {
+        let home = env::var("HOME").unwrap();
+        assert_eq!(
+            expand_path("$HOME/repo"),
+            PathBuf::from(format!("{home}/repo"))
+        );
+        assert_eq!(
+            expand_path("${HOME}/repo"),
+            PathBuf::from(format!("{home}/repo"))
+        );
+    }
+
+    #[test]
+    fn unset_var_expands_to_empty_and_bare_dollar_is_literal() {
+        assert_eq!(
+            expand_path("$AGENTENV_DEFINITELY_UNSET_VAR_XYZ/repo"),
+            PathBuf::from("/repo")
+        );
+        assert_eq!(expand_path("$/foo"), PathBuf::from("$/foo"));
+    }
+
+    #[test]
+    fn load_expands_literal_dollar_home_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("config.toml");
+        fs::write(&file, "[path.\"$HOME\"]\nenv = \"homeenv\"\n").unwrap();
+        let config = load(&file).unwrap().unwrap();
+        let home = fs::canonicalize(env::var("HOME").unwrap()).unwrap();
+        let entry = lookup(&home, &config).unwrap();
+        assert_eq!(entry.env, "homeenv");
     }
 }
