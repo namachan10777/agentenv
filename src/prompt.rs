@@ -4,6 +4,7 @@ use crate::state::{Kind, State, DEFAULT_ENV};
 /// env was selected:
 ///   `name`  — saved state / plain switch (nothing shown for `default`)
 ///   `name*` — pinned by a `.agentenv` file
+///   `name+` — pinned by a config.toml path entry
 ///   `name%` — pinned by `$AGENTENV_OVERRIDE`
 ///   `name!` — pinned by `switch --force`
 pub fn segment(state: Option<&State>) -> String {
@@ -18,6 +19,7 @@ pub fn segment(state: Option<&State>) -> String {
             ""
         }
         Kind::FileOverrided => "*",
+        Kind::ConfigOverrided => "+",
         Kind::EnvOverrided => "%",
         Kind::CliOverrided => "!",
     };
@@ -27,6 +29,7 @@ pub fn segment(state: Option<&State>) -> String {
 pub const STARSHIP_EXAMPLE: &str = r#"# Add to ~/.config/starship.toml.
 # Markers: <env>  saved state / plain switch (hidden for `default`)
 #          <env>* pinned by a .agentenv file
+#          <env>+ pinned by a config.toml path entry
 #          <env>% pinned by $AGENTENV_OVERRIDE
 #          <env>! pinned by `agentenv switch --force`
 [custom.agentenv]
@@ -58,6 +61,10 @@ mod tests {
     fn markers_by_kind() {
         assert_eq!(segment(Some(&state("work", Kind::LoadDefault))), "work");
         assert_eq!(segment(Some(&state("work", Kind::FileOverrided))), "work*");
+        assert_eq!(
+            segment(Some(&state("work", Kind::ConfigOverrided))),
+            "work+"
+        );
         assert_eq!(segment(Some(&state("work", Kind::EnvOverrided))), "work%");
         assert_eq!(segment(Some(&state("work", Kind::CliOverrided))), "work!");
         // A forced/pinned `default` is still worth showing.

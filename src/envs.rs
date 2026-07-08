@@ -1,3 +1,4 @@
+use crate::config::{self, Config};
 use crate::state::DEFAULT_ENV;
 use anyhow::{bail, Context, Result};
 use std::env;
@@ -7,10 +8,12 @@ use std::path::{Path, PathBuf};
 /// Filesystem layout: the `default` env maps to the tools' own config dirs
 /// (~/.claude, ~/.codex); any other env lives under `<data>/agentenv/<name>`.
 /// The last `switch`ed env is persisted in `<state>/agentenv/current`.
+/// `<config>/agentenv/config.toml` holds path-based env pins (see `config`).
 pub struct Dirs {
     home: PathBuf,
     pub data_dir: PathBuf,
     pub state_file: PathBuf,
+    pub config_file: PathBuf,
 }
 
 fn xdg_dir(var: &str, home: &Path, fallback: &str) -> PathBuf {
@@ -25,9 +28,11 @@ impl Dirs {
         let home = PathBuf::from(env::var_os("HOME").context("HOME is not set")?);
         let data = xdg_dir("XDG_DATA_HOME", &home, ".local/share");
         let state = xdg_dir("XDG_STATE_HOME", &home, ".local/state");
+        let config = xdg_dir("XDG_CONFIG_HOME", &home, ".config");
         Ok(Dirs {
             data_dir: data.join("agentenv"),
             state_file: state.join("agentenv").join("current"),
+            config_file: config.join("agentenv").join("config.toml"),
             home,
         })
     }
@@ -103,6 +108,10 @@ impl Dirs {
         fs::write(&self.state_file, format!("{name}\n"))
             .with_context(|| format!("failed to write {}", self.state_file.display()))
     }
+
+    pub fn load_config(&self) -> Result<Option<Config>> {
+        config::load(&self.config_file)
+    }
 }
 
 #[cfg(test)]
@@ -112,6 +121,7 @@ impl Dirs {
             home: root.to_path_buf(),
             data_dir: root.join("data/agentenv"),
             state_file: root.join("state/agentenv/current"),
+            config_file: root.join("config/agentenv/config.toml"),
         }
     }
 }

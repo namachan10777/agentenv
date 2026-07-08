@@ -1,4 +1,5 @@
 mod completion;
+mod config;
 mod emit;
 mod envs;
 mod hook;
@@ -166,6 +167,12 @@ fn cmd_switch(name: Option<String>, force: bool, shell: EvalShell) -> Result<()>
                 "environment is pinned to '{env}' by {}\n\
                  pass --force to override it for this shell, or remove that file",
                 path.display()
+            ),
+            Source::Config { path, env } => bail!(
+                "environment is pinned to '{env}' by config entry for '{}' in {}\n\
+                 pass --force to override it for this shell, or remove that entry",
+                path.display(),
+                dirs.config_file.display()
             ),
             Source::Env { env } => bail!(
                 "environment is pinned to '{env}' by ${OVERRIDE_VAR}\n\

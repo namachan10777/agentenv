@@ -6,13 +6,16 @@ pub const OVERRIDE_VAR: &str = "AGENTENV_OVERRIDE";
 pub const DEFAULT_ENV: &str = "default";
 
 /// Where an environment selection came from, in priority order:
-/// a `.agentenv` file found walking up from PWD, the `AGENTENV_OVERRIDE`
-/// variable, or the saved state file. Also recorded as `shadowed` when
-/// `switch --force` pins a shell, so the pin expires once the source changes.
+/// a `.agentenv` file or a config.toml path entry found walking up from PWD
+/// (at each directory `.agentenv` wins if both are present there), the
+/// `AGENTENV_OVERRIDE` variable, or the saved state file. Also recorded as
+/// `shadowed` when `switch --force` pins a shell, so the pin expires once the
+/// source changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Source {
     File { path: PathBuf, env: String },
+    Config { path: PathBuf, env: String },
     Env { env: String },
     State { env: String },
 }
@@ -20,13 +23,17 @@ pub enum Source {
 impl Source {
     pub fn env(&self) -> &str {
         match self {
-            Source::File { env, .. } | Source::Env { env } | Source::State { env } => env,
+            Source::File { env, .. }
+            | Source::Config { env, .. }
+            | Source::Env { env }
+            | Source::State { env } => env,
         }
     }
 
     pub fn kind(&self) -> Kind {
         match self {
             Source::File { .. } => Kind::FileOverrided,
+            Source::Config { .. } => Kind::ConfigOverrided,
             Source::Env { .. } => Kind::EnvOverrided,
             Source::State { .. } => Kind::LoadDefault,
         }
@@ -46,6 +53,7 @@ impl Source {
 pub enum Kind {
     LoadDefault,
     FileOverrided,
+    ConfigOverrided,
     EnvOverrided,
     CliOverrided,
 }
@@ -88,6 +96,22 @@ mod tests {
         let json = state.to_json();
         assert!(json.contains(r#""type":"cli-overrided""#));
         assert!(json.contains(r#""shadowed":{"type":"file""#));
+        assert_eq!(State::from_env_var(Some(&json)), Some(state));
+    }
+
+    #[test]
+    fn config_source_json_roundtrip() {
+        let state = State {
+            env: "work".into(),
+            kind: Kind::ConfigOverrided,
+            shadowed: Some(Source::Config {
+                path: "/repo".into(),
+                env: "work".into(),
+            }),
+        };
+        let json = state.to_json();
+        assert!(json.contains(r#""type":"config-overrided""#));
+        assert!(json.contains(r#""shadowed":{"type":"config""#));
         assert_eq!(State::from_env_var(Some(&json)), Some(state));
     }
 

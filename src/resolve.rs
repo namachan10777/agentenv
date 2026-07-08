@@ -1,37 +1,48 @@
+use crate::config::{self, Config};
 use crate::envs::{validate_name, Dirs};
 use crate::state::{Kind, Source, State, DEFAULT_ENV};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Walk up from `pwd` to the first `.agentenv` file whose first non-blank
+/// Check `dir` for a `.agentenv` file whose first non-blank, non-comment
 /// line names an environment.
-pub fn find_agentenv_file(pwd: &Path) -> Result<Option<(PathBuf, String)>> {
-    for dir in pwd.ancestors() {
-        let file = dir.join(".agentenv");
-        if !file.is_file() {
-            continue;
-        }
-        let content = fs::read_to_string(&file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        let name = content
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty() && !l.starts_with('#'));
-        if let Some(name) = name {
+fn agentenv_at(dir: &Path) -> Result<Option<(PathBuf, String)>> {
+    let file = dir.join(".agentenv");
+    if !file.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let name = content
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'));
+    match name {
+        Some(name) => {
             validate_name(name)
                 .with_context(|| format!("invalid environment name in {}", file.display()))?;
-            return Ok(Some((file, name.to_owned())));
+            Ok(Some((file, name.to_owned())))
         }
+        None => Ok(None),
     }
-    Ok(None)
 }
 
-/// Resolve the "true source" for the current shell:
-/// `.agentenv` > `AGENTENV_OVERRIDE` > state file (falling back to `default`).
+/// Resolve the "true source" for the current shell. Walking up from `pwd`,
+/// each directory is checked for a `.agentenv` file, then (if absent) a
+/// config.toml path entry; the first match found, at the closest directory,
+/// wins (so `.agentenv` only beats config.toml when both live in the same
+/// directory). Falls through to `AGENTENV_OVERRIDE`, then the state file
+/// (falling back to `default`).
 pub fn resolve_source(pwd: &Path, override_var: Option<&str>, dirs: &Dirs) -> Result<Source> {
-    if let Some((path, env)) = find_agentenv_file(pwd)? {
-        return Ok(Source::File { path, env });
+    let config = dirs.load_config()?;
+    for dir in pwd.ancestors() {
+        if let Some((path, env)) = agentenv_at(dir)? {
+            return Ok(Source::File { path, env });
+        }
+        if let Some(source) = config_source_at(dir, config.as_ref())? {
+            return Ok(source);
+        }
     }
     if let Some(env) = override_var.map(str::trim).filter(|s| !s.is_empty()) {
         validate_name(env).context("invalid environment name in AGENTENV_OVERRIDE")?;
@@ -44,6 +55,28 @@ pub fn resolve_source(pwd: &Path, override_var: Option<&str>, dirs: &Dirs) -> Re
             .read_state_file()
             .unwrap_or_else(|| DEFAULT_ENV.to_owned()),
     })
+}
+
+fn config_source_at(dir: &Path, config: Option<&Config>) -> Result<Option<Source>> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let Ok(canon) = fs::canonicalize(dir) else {
+        return Ok(None);
+    };
+    let Some(entry) = config::lookup(&canon, config) else {
+        return Ok(None);
+    };
+    validate_name(&entry.env).with_context(|| {
+        format!(
+            "invalid environment name for path {} in config",
+            dir.display()
+        )
+    })?;
+    Ok(Some(Source::Config {
+        path: dir.to_path_buf(),
+        env: entry.env.clone(),
+    }))
 }
 
 pub enum LoadAction {
@@ -83,23 +116,41 @@ mod tests {
         }
     }
 
+    fn dirs_with_config(root: &Path, toml: &str) -> Dirs {
+        let dirs = Dirs::for_tests(root);
+        fs::create_dir_all(dirs.config_file.parent().unwrap()).unwrap();
+        fs::write(&dirs.config_file, toml).unwrap();
+        dirs
+    }
+
+    fn config_toml_for(path: &Path, env: &str) -> String {
+        format!("[path.\"{}\"]\nenv = \"{env}\"\n", path.display())
+    }
+
     #[test]
     fn agentenv_file_is_found_in_ancestor() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         fs::create_dir_all(root.join("a/b")).unwrap();
         fs::write(root.join("a/.agentenv"), "# comment\n\nproj\n").unwrap();
-        let (path, env) = find_agentenv_file(&root.join("a/b")).unwrap().unwrap();
-        assert_eq!(path, root.join("a/.agentenv"));
-        assert_eq!(env, "proj");
-        assert_eq!(find_agentenv_file(&root).unwrap(), None);
+        let dirs = Dirs::for_tests(&root);
+        let source = resolve_source(&root.join("a/b"), None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::File {
+                path: root.join("a/.agentenv"),
+                env: "proj".into(),
+            }
+        );
+        assert_eq!(agentenv_at(&root).unwrap(), None);
     }
 
     #[test]
     fn agentenv_file_with_invalid_name_is_an_error() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join(".agentenv"), "../evil\n").unwrap();
-        assert!(find_agentenv_file(tmp.path()).is_err());
+        let dirs = Dirs::for_tests(tmp.path());
+        assert!(resolve_source(tmp.path(), None, &dirs).is_err());
     }
 
     #[test]
@@ -135,5 +186,122 @@ mod tests {
         // Different source type (e.g. left the .agentenv directory) -> expires.
         let left = Source::State { env: "proj".into() };
         assert!(matches!(plan_load(Some(&cur), &left), LoadAction::Apply(_)));
+    }
+
+    #[test]
+    fn cli_override_survives_with_config_shadow() {
+        let shadowed = Source::Config {
+            path: "/repo".into(),
+            env: "proj".into(),
+        };
+        let cur = state("forced", Kind::CliOverrided, Some(shadowed.clone()));
+        assert!(matches!(plan_load(Some(&cur), &shadowed), LoadAction::Keep));
+
+        let changed = Source::Config {
+            path: "/repo".into(),
+            env: "other".into(),
+        };
+        match plan_load(Some(&cur), &changed) {
+            LoadAction::Apply(s) => assert_eq!(s, state("other", Kind::ConfigOverrided, None)),
+            LoadAction::Keep => panic!("expected apply"),
+        }
+    }
+
+    #[test]
+    fn config_entry_used_when_no_agentenv() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("repo")).unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root.join("repo"), "cfgenv"));
+        let source = resolve_source(&root.join("repo"), None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::Config {
+                path: root.join("repo"),
+                env: "cfgenv".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn agentenv_wins_over_config_in_same_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::write(root.join(".agentenv"), "fileenv\n").unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root, "cfgenv"));
+        let source = resolve_source(&root, None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::File {
+                path: root.join(".agentenv"),
+                env: "fileenv".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn agentenv_wins_when_closer_to_pwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("a/b/c")).unwrap();
+        fs::write(root.join("a/b/.agentenv"), "fileenv\n").unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root.join("a"), "cfgenv"));
+        let source = resolve_source(&root.join("a/b/c"), None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::File {
+                path: root.join("a/b/.agentenv"),
+                env: "fileenv".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn config_wins_when_closer_to_pwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("a/b/c")).unwrap();
+        fs::write(root.join("a/.agentenv"), "fileenv\n").unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root.join("a/b"), "cfgenv"));
+        let source = resolve_source(&root.join("a/b/c"), None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::Config {
+                path: root.join("a/b"),
+                env: "cfgenv".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn config_matches_nested_subdirectory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("repo/sub/deep")).unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root.join("repo"), "cfgenv"));
+        let source = resolve_source(&root.join("repo/sub/deep"), None, &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::Config {
+                path: root.join("repo"),
+                env: "cfgenv".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn config_beats_override_and_state_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("repo")).unwrap();
+        let dirs = dirs_with_config(&root, &config_toml_for(&root.join("repo"), "cfgenv"));
+        let source = resolve_source(&root.join("repo"), Some("overrideenv"), &dirs).unwrap();
+        assert_eq!(
+            source,
+            Source::Config {
+                path: root.join("repo"),
+                env: "cfgenv".into(),
+            }
+        );
     }
 }
