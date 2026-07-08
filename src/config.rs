@@ -148,15 +148,22 @@ mod tests {
 
     #[test]
     fn expands_tilde_to_home() {
-        let home = env::var("HOME").unwrap();
-        assert_eq!(expand_path("~/repo"), PathBuf::from(format!("{home}/repo")));
+        let Some(home) = existing_home_dir() else {
+            return;
+        };
+        assert_eq!(
+            expand_path("~/repo"),
+            PathBuf::from(format!("{home}/repo"))
+        );
         assert_eq!(expand_path("~"), PathBuf::from(home));
         assert_eq!(expand_path("/foo~bar"), PathBuf::from("/foo~bar"));
     }
 
     #[test]
     fn expands_dollar_var_and_braced_var() {
-        let home = env::var("HOME").unwrap();
+        let Some(home) = existing_home_dir() else {
+            return;
+        };
         assert_eq!(
             expand_path("$HOME/repo"),
             PathBuf::from(format!("{home}/repo"))
@@ -178,6 +185,9 @@ mod tests {
 
     #[test]
     fn load_expands_literal_dollar_home_key() {
+        let Some(_) = existing_home_dir() else {
+            return;
+        };
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("config.toml");
         fs::write(&file, "[path.\"$HOME\"]\nenv = \"homeenv\"\n").unwrap();
@@ -185,5 +195,13 @@ mod tests {
         let home = fs::canonicalize(env::var("HOME").unwrap()).unwrap();
         let entry = lookup(&home, &config).unwrap();
         assert_eq!(entry.env, "homeenv");
+    }
+
+    /// `$HOME` may be unset or point at a nonexistent directory in sandboxed
+    /// build environments (e.g. Nix); tests that rely on the ambient `$HOME`
+    /// skip themselves in that case rather than failing the build.
+    fn existing_home_dir() -> Option<String> {
+        let home = env::var("HOME").ok()?;
+        Path::new(&home).is_dir().then_some(home)
     }
 }
