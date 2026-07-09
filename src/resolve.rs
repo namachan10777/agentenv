@@ -12,8 +12,8 @@ fn agentenv_at(dir: &Path) -> Result<Option<(PathBuf, String)>> {
     if !file.is_file() {
         return Ok(None);
     }
-    let content = fs::read_to_string(&file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content =
+        fs::read_to_string(&file).with_context(|| format!("failed to read {}", file.display()))?;
     let name = content
         .lines()
         .map(str::trim)

@@ -38,8 +38,7 @@ pub fn load(config_file: &Path) -> Result<Option<Config>> {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => {
-            return Err(err)
-                .with_context(|| format!("failed to read {}", config_file.display()))
+            return Err(err).with_context(|| format!("failed to read {}", config_file.display()))
         }
     };
     let mut config: Config = toml::from_str(&content)
@@ -58,12 +57,10 @@ pub fn load(config_file: &Path) -> Result<Option<Config>> {
 /// Expand a leading `~` (to `$HOME`) and any `$VAR` / `${VAR}` references.
 fn expand_path(raw: &str) -> PathBuf {
     let raw = match raw.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
-            match env::var_os("HOME") {
-                Some(home) => format!("{}{rest}", home.to_string_lossy()),
-                None => raw.to_owned(),
-            }
-        }
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => match env::var_os("HOME") {
+            Some(home) => format!("{}{rest}", home.to_string_lossy()),
+            None => raw.to_owned(),
+        },
         _ => raw.to_owned(),
     };
     PathBuf::from(expand_env_vars(&raw))
@@ -151,10 +148,7 @@ mod tests {
         let Some(home) = existing_home_dir() else {
             return;
         };
-        assert_eq!(
-            expand_path("~/repo"),
-            PathBuf::from(format!("{home}/repo"))
-        );
+        assert_eq!(expand_path("~/repo"), PathBuf::from(format!("{home}/repo")));
         assert_eq!(expand_path("~"), PathBuf::from(home));
         assert_eq!(expand_path("/foo~bar"), PathBuf::from("/foo~bar"));
     }
