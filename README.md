@@ -1,11 +1,12 @@
 # agentenv
 
-easy agent switcher — switches the Claude Code / Codex profile
-(`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) of the current shell between named
-environments.
+easy agent switcher — switches the Claude Code / Codex / OpenCode profile
+(`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR`) of the current
+shell between named environments.
 
-- The `default` environment maps to the tools' own defaults (`~/.claude`,
-  `~/.codex`) and cannot be removed.
+- The `default` environment leaves the tools' profile variables unset so they
+  use their own defaults (`~/.claude`, `~/.codex`, and the standard OpenCode
+  config directory), and cannot be removed.
 - Any other environment lives under `$XDG_DATA_HOME/agentenv/<name>`
   (default `~/.local/share/agentenv/<name>`).
 - The last `switch`ed environment is saved to

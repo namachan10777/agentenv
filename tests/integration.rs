@@ -65,12 +65,15 @@ fn switch_creates_env_and_emits_exports() {
     assert!(stdout.contains("export CLAUDE_CONFIG_DIR="));
     assert!(stdout.contains("agentenv/work/claude"));
     assert!(stdout.contains("export CODEX_HOME="));
+    assert!(stdout.contains("export OPENCODE_CONFIG_DIR="));
+    assert!(stdout.contains("agentenv/work/opencode"));
     assert_eq!(
         state_from_output(&stdout),
         json!({"env": "work", "type": "load-default"})
     );
     assert!(fx.data_dir().join("work/claude").is_dir());
     assert!(fx.data_dir().join("work/codex").is_dir());
+    assert!(fx.data_dir().join("work/opencode").is_dir());
     assert_eq!(fs::read_to_string(fx.state_file()).unwrap(), "work\n");
 }
 
@@ -82,8 +85,19 @@ fn switch_to_default_unsets_tool_vars() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "unset CLAUDE_CONFIG_DIR CODEX_HOME",
+            "unset CLAUDE_CONFIG_DIR CODEX_HOME OPENCODE_CONFIG_DIR",
         ));
+}
+
+#[test]
+fn switch_existing_env_adds_missing_opencode_dir() {
+    let fx = Fixture::new();
+    fs::create_dir_all(fx.data_dir().join("work/claude")).unwrap();
+    fs::create_dir_all(fx.data_dir().join("work/codex")).unwrap();
+
+    fx.cmd().args(["switch", "work"]).assert().success();
+
+    assert!(fx.data_dir().join("work/opencode").is_dir());
 }
 
 #[test]
@@ -94,6 +108,7 @@ fn switch_fish_syntax() {
         .assert()
         .success()
         .stdout(predicate::str::contains("set -gx CLAUDE_CONFIG_DIR"))
+        .stdout(predicate::str::contains("set -gx OPENCODE_CONFIG_DIR"))
         .stdout(predicate::str::contains("set -gx AGENTENV_STATE"));
 }
 
@@ -300,6 +315,10 @@ fn list_variants() {
         .as_str()
         .unwrap()
         .ends_with("agentenv/beta/claude"));
+    assert!(beta["opencode_dir"]
+        .as_str()
+        .unwrap()
+        .ends_with("agentenv/beta/opencode"));
     let default = entries.iter().find(|e| e["name"] == "default").unwrap();
     assert!(default["claude_dir"].as_str().unwrap().ends_with(".claude"));
 }
@@ -345,7 +364,7 @@ fn remove_current_env_falls_back_to_default() {
         .assert()
         .success();
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
-    assert!(stdout.contains("unset CLAUDE_CONFIG_DIR CODEX_HOME"));
+    assert!(stdout.contains("unset CLAUDE_CONFIG_DIR CODEX_HOME OPENCODE_CONFIG_DIR"));
     assert_eq!(fs::read_to_string(fx.state_file()).unwrap(), "default\n");
     assert!(!fx.data_dir().join("work").exists());
 

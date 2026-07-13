@@ -1,5 +1,5 @@
 {
-  description = "agentenv - switch Claude Code / Codex profiles per shell";
+  description = "agentenv - switch Claude Code / Codex / OpenCode profiles per shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -19,12 +19,12 @@
       packages = forAllSystems (pkgs: rec {
         agentenv = pkgs.rustPlatform.buildRustPackage {
           pname = "agentenv";
-          version = "0.1.0";
+          version = "0.3.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
           meta = {
-            description = "Switch Claude Code / Codex profiles per shell";
+            description = "Switch Claude Code / Codex / OpenCode profiles per shell";
             mainProgram = "agentenv";
           };
         };

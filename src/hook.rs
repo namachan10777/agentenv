@@ -58,7 +58,7 @@ _agentenv_load
 
 // Piped to `source` (not `eval (...)`) so multi-line output keeps its
 // newlines; fish command substitution would collapse them into spaces.
-pub const FISH: &str = r#"function agentenv --description 'Switch the Claude/Codex profile of the current shell'
+pub const FISH: &str = r#"function agentenv --description 'Switch the Claude/Codex/OpenCode profile of the current shell'
     switch "$argv[1]"
         case switch load remove ''
             command agentenv --shell fish $argv | source

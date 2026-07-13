@@ -18,9 +18,10 @@ use state::{Kind, Source, State, DEFAULT_ENV, OVERRIDE_VAR, STATE_VAR};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// Switch Claude Code / Codex profiles (CLAUDE_CONFIG_DIR / CODEX_HOME) per
-/// shell. `switch`, `load` and `remove` print eval-able code to stdout; set
-/// up the wrapper that evals it with `agentenv hook --shell <your-shell>`.
+/// Switch Claude Code / Codex / OpenCode profiles (CLAUDE_CONFIG_DIR /
+/// CODEX_HOME / OPENCODE_CONFIG_DIR) per shell. `switch`, `load` and `remove`
+/// print eval-able code to stdout; set up the wrapper that evals it with
+/// `agentenv hook --shell <your-shell>`.
 #[derive(Parser)]
 #[command(name = "agentenv", version)]
 struct Cli {
@@ -185,8 +186,11 @@ fn cmd_switch(name: Option<String>, force: bool, shell: EvalShell) -> Result<()>
         return Ok(());
     };
     envs::validate_name(&name)?;
-    if !dirs.exists(&name) {
+    let existed = dirs.exists(&name);
+    if name != DEFAULT_ENV {
         dirs.create(&name)?;
+    }
+    if !existed {
         eprintln!("created environment: {name}");
     }
     let state = if force {
@@ -216,7 +220,7 @@ fn cmd_switch(name: Option<String>, force: bool, shell: EvalShell) -> Result<()>
 fn cmd_load(shell: EvalShell) -> Result<()> {
     let dirs = Dirs::from_env()?;
     let source = current_source(&dirs)?;
-    if !dirs.exists(source.env()) {
+    if source.env() != DEFAULT_ENV {
         dirs.create(source.env())?;
     }
     match plan_load(current_state().as_ref(), &source) {
@@ -273,6 +277,7 @@ fn cmd_list(json: bool, plain: bool) -> Result<()> {
             current: bool,
             claude_dir: PathBuf,
             codex_dir: PathBuf,
+            opencode_dir: PathBuf,
         }
         let entries: Vec<Entry> = names
             .iter()
@@ -281,6 +286,7 @@ fn cmd_list(json: bool, plain: bool) -> Result<()> {
                 current: *name == current,
                 claude_dir: dirs.claude_dir(name),
                 codex_dir: dirs.codex_dir(name),
+                opencode_dir: dirs.opencode_dir(name),
             })
             .collect();
         println!("{}", serde_json::to_string(&entries)?);

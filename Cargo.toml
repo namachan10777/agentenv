@@ -1,8 +1,8 @@
 [package]
 name = "agentenv"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Switch Claude Code / Codex profiles per shell"
+description = "Switch Claude Code / Codex / OpenCode profiles per shell"
 license = "MIT"
 repository = "https://github.com/namachan10777/agentenv"
 

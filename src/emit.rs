@@ -30,8 +30,12 @@ pub fn emit_exports(state: &State, dirs: &Dirs, shell: EvalShell) -> String {
     let mut out = String::new();
     if state.env == DEFAULT_ENV {
         match shell {
-            EvalShell::Posix => out.push_str("unset CLAUDE_CONFIG_DIR CODEX_HOME\n"),
-            EvalShell::Fish => out.push_str("set -e CLAUDE_CONFIG_DIR\nset -e CODEX_HOME\n"),
+            EvalShell::Posix => {
+                out.push_str("unset CLAUDE_CONFIG_DIR CODEX_HOME OPENCODE_CONFIG_DIR\n")
+            }
+            EvalShell::Fish => out.push_str(
+                "set -e CLAUDE_CONFIG_DIR\nset -e CODEX_HOME\nset -e OPENCODE_CONFIG_DIR\n",
+            ),
         }
     } else {
         export(
@@ -44,6 +48,12 @@ pub fn emit_exports(state: &State, dirs: &Dirs, shell: EvalShell) -> String {
             &mut out,
             "CODEX_HOME",
             &dirs.codex_dir(&state.env).to_string_lossy(),
+            shell,
+        );
+        export(
+            &mut out,
+            "OPENCODE_CONFIG_DIR",
+            &dirs.opencode_dir(&state.env).to_string_lossy(),
             shell,
         );
     }
@@ -75,10 +85,11 @@ mod tests {
             shadowed: None,
         };
         let posix = emit_exports(&state, &dirs, EvalShell::Posix);
-        assert!(posix.starts_with("unset CLAUDE_CONFIG_DIR CODEX_HOME\n"));
+        assert!(posix.starts_with("unset CLAUDE_CONFIG_DIR CODEX_HOME OPENCODE_CONFIG_DIR\n"));
         assert!(posix.contains("export AGENTENV_STATE="));
         let fish = emit_exports(&state, &dirs, EvalShell::Fish);
         assert!(fish.contains("set -e CLAUDE_CONFIG_DIR\n"));
+        assert!(fish.contains("set -e OPENCODE_CONFIG_DIR\n"));
         assert!(fish.contains("set -gx AGENTENV_STATE "));
     }
 
@@ -94,6 +105,8 @@ mod tests {
         assert!(out.contains("export CLAUDE_CONFIG_DIR="));
         assert!(out.contains("agentenv/work/claude"));
         assert!(out.contains("export CODEX_HOME="));
+        assert!(out.contains("export OPENCODE_CONFIG_DIR="));
+        assert!(out.contains("agentenv/work/opencode"));
     }
 
     fn test_dirs() -> Dirs {

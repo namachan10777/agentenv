@@ -5,12 +5,13 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Filesystem layout: the `default` env maps to the tools' own config dirs
-/// (~/.claude, ~/.codex); any other env lives under `<data>/agentenv/<name>`.
+/// Filesystem layout: the `default` env maps to the tools' own config dirs;
+/// any other env lives under `<data>/agentenv/<name>`.
 /// The last `switch`ed env is persisted in `<state>/agentenv/current`.
 /// `<config>/agentenv/config.toml` holds path-based env pins (see `config`).
 pub struct Dirs {
     home: PathBuf,
+    config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_file: PathBuf,
     pub config_file: PathBuf,
@@ -33,6 +34,7 @@ impl Dirs {
             data_dir: data.join("agentenv"),
             state_file: state.join("agentenv").join("current"),
             config_file: config.join("agentenv").join("config.toml"),
+            config_dir: config,
             home,
         })
     }
@@ -53,6 +55,14 @@ impl Dirs {
         }
     }
 
+    pub fn opencode_dir(&self, name: &str) -> PathBuf {
+        if name == DEFAULT_ENV {
+            self.config_dir.join("opencode")
+        } else {
+            self.data_dir.join(name).join("opencode")
+        }
+    }
+
     pub fn exists(&self, name: &str) -> bool {
         name == DEFAULT_ENV || self.data_dir.join(name).is_dir()
     }
@@ -63,6 +73,7 @@ impl Dirs {
         validate_name(name)?;
         fs::create_dir_all(self.claude_dir(name))?;
         fs::create_dir_all(self.codex_dir(name))?;
+        fs::create_dir_all(self.opencode_dir(name))?;
         Ok(())
     }
 
@@ -122,6 +133,7 @@ impl Dirs {
             data_dir: root.join("data/agentenv"),
             state_file: root.join("state/agentenv/current"),
             config_file: root.join("config/agentenv/config.toml"),
+            config_dir: root.join("config"),
         }
     }
 }
@@ -151,6 +163,10 @@ mod tests {
         let d = dirs(Path::new("/home/u"));
         assert_eq!(d.claude_dir("default"), Path::new("/home/u/.claude"));
         assert_eq!(d.codex_dir("default"), Path::new("/home/u/.codex"));
+        assert_eq!(
+            d.opencode_dir("default"),
+            Path::new("/home/u/config/opencode")
+        );
         assert!(d.exists("default"));
     }
 
@@ -162,6 +178,8 @@ mod tests {
         d.create("work").unwrap();
         assert!(d.exists("work"));
         assert!(d.claude_dir("work").is_dir());
+        assert!(d.codex_dir("work").is_dir());
+        assert!(d.opencode_dir("work").is_dir());
         assert_eq!(d.list().unwrap(), vec!["default", "work"]);
         d.remove("work").unwrap();
         assert!(!d.exists("work"));
