@@ -50,7 +50,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/agentenv" LICENSE THIRDPARTY.yml README.md "$name/"
           tar czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agentenv-${{ matrix.target }}
           path: |
@@ -61,7 +61,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
